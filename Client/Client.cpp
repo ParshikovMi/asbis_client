@@ -10,11 +10,39 @@
 #include <ws2tcpip.h>
 #include <stdlib.h>
 #include <windows.h>
+//#include "KMLTransformer.h"
+#pragma comment(lib, "libkmlbase.lib")
+#pragma comment(lib, "libkmldom.lib")
 #pragma comment(lib, "ws2_32.lib")
 
 using namespace std;
 
 #pragma warning(disable: 4996)
+
+//PPM
+
+struct PPM
+{
+    float latitude; //Широта
+    float longitude; //Долгота 
+    float height; //Высота
+};
+
+//Aircraft
+
+class Aircraft
+{
+public:
+    float latitude; //Широта
+    float longitude; //Долгота 
+    float height; //Высота
+    float V0; //Начальная скорость
+    float A0; //Начальный курс
+    float roll; //Крен
+    float pitch; //Тангаж
+    float yaw; //Рысканье
+
+};
 
 //ARINC-429
 
@@ -162,7 +190,7 @@ condition_variable cv;
 mutex mtx;
 queue <protocol> MesBuf;
 queue <protocol> MesBufSNS;
-int fi, alfa;
+int fi, alfa, INS_flag_navig, SNS_flag_navig;
 SYSTEMTIME st;
 
 int calc(double price, int high, int col, double val) // цена старшего разряда, старший разряд, число значащих разрядов, значение
@@ -862,6 +890,7 @@ void ModelINS()
     INS INS;
     INS.Control();
     INS.Preparation();
+    INS_flag_navig = 1;
     INS.Navigation();
 }
 
@@ -869,7 +898,54 @@ void ModelSNS()
 {
     SNS SNS;
     SNS.Control();
+    SNS_flag_navig = 1;
     SNS.Navigation();
+}
+
+void ModelAircraft()
+{
+    while ((INS_flag_navig == 0) && (SNS_flag_navig == 0))
+    {
+        int p = 0;
+    }
+
+    Aircraft Aircraft;
+    
+    Aircraft.V0 = 0;
+    Aircraft.A0 = 0;
+    Aircraft.height = 0;
+    Aircraft.latitude = 5000;
+    Aircraft.longitude = 5000;
+    Aircraft.pitch = 0;
+    Aircraft.roll = 0;
+    Aircraft.yaw = 0;
+
+    int i = 0;
+
+    PPM PPMs[3];
+
+    PPM PPM1;
+    PPM1.height = 0;
+    PPM1.latitude = 10000;
+    PPM1.longitude = 10000;
+    PPMs[0] = PPM1;
+
+    PPM PPM2;
+    PPM2.height = 0;
+    PPM2.latitude = 20000;
+    PPM2.longitude = 15000;
+    PPMs[1] = PPM2;
+
+    PPM PPM3;
+    PPM3.height = 0;
+    PPM3.latitude = 30000;
+    PPM3.longitude = 20000;
+    PPMs[2] = PPM3;
+
+    while (i != 2)
+    {
+
+    }
 }
 
 int main()
@@ -880,6 +956,8 @@ int main()
     CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)SendDataINS, NULL, NULL, NULL);
     CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)ModelSNS, NULL, NULL, NULL);
     CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)SendDataSNS, NULL, NULL, NULL);
+
+    CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)ModelAircraft, NULL, NULL, NULL);
 
     while (true)
     {

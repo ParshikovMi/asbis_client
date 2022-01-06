@@ -1,3 +1,2 @@
 ﻿  Client.cpp
-C:\Users\parsh\source\repos\Client\Client\Client.cpp(192,46): warning C4244: +=: преобразование "double" в "int", возможна потеря данных
-  Client.vcxproj -> C:\Users\parsh\source\repos\Client\Debug\Client.exe
+C:\Libs\libkml-master\src\kml\base\xml_element.h(31,10): fatal error C1083: Не удается открыть файл включение: boost/intrusive_ptr.hpp: No such file or directory,
