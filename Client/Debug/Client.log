@@ -1,0 +1,3 @@
+﻿  Client.cpp
+C:\Users\parsh\source\repos\Client\Client\Client.cpp(192,46): warning C4244: +=: преобразование "double" в "int", возможна потеря данных
+  Client.vcxproj -> C:\Users\parsh\source\repos\Client\Debug\Client.exe
