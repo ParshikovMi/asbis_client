@@ -10,7 +10,7 @@
 #include <ws2tcpip.h>
 #include <stdlib.h>
 #include <windows.h>
-#include <KMLTransformer.h>
+//#include <KMLTransformer.h>
 #pragma comment(lib, "ws2_32.lib")
 
 using namespace std;
@@ -45,6 +45,7 @@ public:
     int captured;
     float w;
     float D;
+    float ws;
 };
 
 //ARINC-429
@@ -207,8 +208,8 @@ float height_related = 0;
 float ap_xy = 0;
 float ap_xz = 0;
 float dpl = 0;
-float w = 0.0005;
-float wz = 0.0035;
+float w = 0.01;
+float wz = 0.02;
 float wz_min = -pi / 2;
 float wz_max = 0;
 bool clockwise = 1;
@@ -951,8 +952,8 @@ void Fly()
 {
     
     mtx.lock();
-    Aircrafts.longitude = Aircrafts.longitude + 10000*(Aircrafts.V0 / 3600000) * cos(Aircrafts.pitch) * sin(Aircrafts.A0);
-    Aircrafts.latitude = Aircrafts.latitude + 10000*(Aircrafts.V0 / 3600000) * cos(Aircrafts.pitch) * cos(Aircrafts.A0);
+    Aircrafts.longitude = Aircrafts.longitude + 10000*(Aircrafts.V0 / 3600000) * cos(Aircrafts.pitch) * cos(Aircrafts.A0);
+    Aircrafts.latitude = Aircrafts.latitude + 10000*(Aircrafts.V0 / 3600000) * cos(Aircrafts.pitch) * sin(Aircrafts.A0);
     if (Aircrafts.height < 6)
     {
         Aircrafts.height = Aircrafts.height + 10000*(Aircrafts.V0 / 3600000) * sin(Aircrafts.pitch);
@@ -965,7 +966,6 @@ void Fly()
 
     // Дальность
     Aircrafts.D = sqrt(pow((Aircrafts.latitude - PPMs[Aircrafts.IdPPM].latitude), 2) + pow((Aircrafts.longitude - PPMs[Aircrafts.IdPPM].longitude), 2));
-    cout << "D = " << Aircrafts.D << " ; H = " << Aircrafts.height << " ; IdPPM = " << Aircrafts.IdPPM << endl;
     
 }
 
@@ -1001,82 +1001,89 @@ void OPS()
     float ap_xy_r = atan2(latitude_related, longitude_related);
     float ap_xz_r = atan2(height_related, longitude_related);
 
-    ap_xy = Aircrafts.A0 + ap_xy;
-
     float w_max = Aircrafts.A0 + pi / 4;
     float w_min = Aircrafts.A0 + (-pi / 4);
 
     if (ap_xy_r >= w_max)
     {
         mtx.lock();
-        Aircrafts.A0 = Aircrafts.A0 + Aircrafts.w;
+        Aircrafts.A0 = Aircrafts.A0 + Aircrafts.ws;
         mtx.unlock();
+        ap_xy = ap_xy + Aircrafts.ws;
     }
     if (ap_xy_r <= w_min)
     {
         mtx.lock();
-        Aircrafts.A0 = Aircrafts.A0 - Aircrafts.w;
+        Aircrafts.A0 = Aircrafts.A0 - Aircrafts.ws;
         mtx.unlock();
+        ap_xy = ap_xy - Aircrafts.ws;
     }
+
+    w_max = Aircrafts.A0 + pi / 4;
+    w_min = Aircrafts.A0 + (-pi / 4);
 
     if (!Aircrafts.captured)
     {
-        if (ap_xy < ap_xy_r)
+        if ((ap_xy < ap_xy_r) && (ap_xy < w_max - w))
         {
             clockwise = 0;
+            ap_xy = ap_xy + w;
         }
-        else
+        else if ((ap_xy > ap_xy_r) && (ap_xy > w_min + w))
         {
             clockwise = 1;
+            ap_xy = ap_xy - w;
         }
-        if (ap_xz > ap_xz_r)
+        if ((ap_xz > ap_xz_r) && (ap_xz > wz_min + wz))
         {
             clockwise_z = 1;
+            ap_xz = ap_xz - wz;
         }
-        else
+        else if ((ap_xz < ap_xz_r) && (ap_xz < wz_max - wz))
         {
             clockwise_z = 0;
+            ap_xz = ap_xz + wz;
         }
 
         //ap_prev_xy = ap_xy;
-        if ((ap_xy > w_min + w) && clockwise)
-        {
-            ap_xy = ap_xy - w;
-        }
-        else if ((ap_xy <= w_min - w) && clockwise)
-            {
-                clockwise = 0;
-                ap_xy = ap_xy + w;
-            }
-        else if ((ap_xy < w_max - w) and (!clockwise))
-            {
-                ap_xy = ap_xy + w;
-            }
-        else if ((ap_xy >= w_max + w) && (!clockwise))
-            {
-                clockwise = 1;
-                ap_xy = ap_xy - w;
-            }
+        //if ((ap_xy > w_min + w) && clockwise)
+        //{
+        //    ap_xy = ap_xy - w;
+        //}
+        //else if ((ap_xy <= w_min - w) && clockwise)
+        //    {
+        //        clockwise = 0;
+        //        ap_xy = ap_xy + w;
+        //    }
+        //else if ((ap_xy < w_max - w) and (!clockwise))
+        //    {
+        //        ap_xy = ap_xy + w;
+        //    }
+        //else if ((ap_xy >= w_max + w) && (!clockwise))
+        //    {
+        //        clockwise = 1;
+        //        ap_xy = ap_xy - w;
+        //    }
 
-        //ap_prev_xz = ap_xz;
-        if ((ap_xz > wz_min + wz) && clockwise_z)
-        {
-            ap_xz = ap_xz - wz;
-        }
-        else if ((ap_xz <= wz_min - wz) && clockwise_z)
-            {
-                clockwise_z = 0;
-                ap_xz = ap_xz + wz;
-            }
-        else if ((ap_xz < wz_max - wz) and (!clockwise_z))
-            {
-                ap_xz = ap_xz + wz;
-            }
-        else if ((ap_xz >= wz_min + wz) && (!clockwise_z))
-            {
-                clockwise_z = 1;
-                ap_xz = ap_xz - wz;
-            }
+        ////ap_prev_xz = ap_xz;
+        //if ((ap_xz > wz_min + wz) && clockwise_z)
+        //{
+        //    ap_xz = ap_xz - wz;
+        //}
+        //else if ((ap_xz <= wz_min - wz) && clockwise_z)
+        //    {
+        //        clockwise_z = 0;
+        //        ap_xz = ap_xz + wz;
+        //    }
+        //else if ((ap_xz < wz_max - wz) and (!clockwise_z))
+        //    {
+        //        ap_xz = ap_xz + wz;
+        //    }
+        //else if ((ap_xz >= wz_min + wz) && (!clockwise_z))
+        //    {
+        //        clockwise_z = 1;
+        //        ap_xz = ap_xz - wz;
+        //    }
 
         if ((ap_xy < ap_xy_r + w) && (ap_xy > ap_xy_r - w) && (ap_xz < ap_xz_r + wz) && (ap_xz > ap_xz_r - wz))
         {
@@ -1108,33 +1115,54 @@ void OPS()
 
         if ((ap_xy_r < w_max) && (ap_xy_r > w_min) && (ap_xz_r < wz_max) && (ap_xz_r > wz_min))
         {
-            diff = ap_xy_r - ap_xy;
-            if (diff > 0)
+            //diff = ap_xy_r - ap_xy;
+            //if (diff > 0)
+            //{
+            //    clockwise = 0;
+            //    mtx.lock();
+            //    //Aircrafts.A0 = Aircrafts.A0 + Aircrafts.w;
+            //    mtx.unlock();
+            //    ap_xy = Aircrafts.A0 + ap_xy + w;
+            //}
+            //else if (diff < 0)
+            //{
+            //    clockwise = 1;
+            //    mtx.lock();
+            //    //Aircrafts.A0 = Aircrafts.A0 - Aircrafts.w;
+            //    mtx.unlock();
+            //    ap_xy = Aircrafts.A0 + ap_xy - w;
+            //}
+            //diff_z = ap_xz_r - ap_xz;
+            //if (diff_z > 0)
+            //{
+            //    clockwise_z = 0;
+            //    ap_xz = ap_xz + wz;
+            //}
+            //else if (diff_z < 0)
+            //{
+            //    clockwise_z = 1;
+            //    ap_xz = ap_xz - wz;
+            //}
+
+            if ((ap_xy < ap_xy_r) && (ap_xy < w_max - w))
             {
                 clockwise = 0;
-                mtx.lock();
-                Aircrafts.A0 = Aircrafts.A0 + Aircrafts.w;
-                mtx.unlock();
-                ap_xy = Aircrafts.A0 + ap_xy + w;
+                ap_xy = ap_xy + w;
             }
-            else if (diff < 0)
+            else if ((ap_xy > ap_xy_r) && (ap_xy >= w_min + w))
             {
                 clockwise = 1;
-                mtx.lock();
-                Aircrafts.A0 = Aircrafts.A0 - Aircrafts.w;
-                mtx.unlock();
-                ap_xy = Aircrafts.A0 + ap_xy - w;
+                ap_xy = ap_xy - w;
             }
-            diff_z = ap_xz_r - ap_xz;
-            if (diff_z > 0)
-            {
-                clockwise_z = 0;
-                ap_xz = ap_xz + wz;
-            }
-            else if (diff_z < 0)
+            if ((ap_xz > ap_xz_r) && (ap_xz > wz_min + wz))
             {
                 clockwise_z = 1;
                 ap_xz = ap_xz - wz;
+            }
+            else if ((ap_xz < ap_xz_r) && (ap_xz < wz_max - wz))
+            {
+                clockwise_z = 0;
+                ap_xz = ap_xz + wz;
             }
         }
         else
@@ -1144,6 +1172,45 @@ void OPS()
             cout << "Цель потеряна!" << endl;
             mtx.unlock();
         }
+
+        //if ((ap_xy > w_min + w) && clockwise)
+        //{
+        //    ap_xy = ap_xy - w;
+        //}
+        //else if ((ap_xy <= w_min - w) && clockwise)
+        //{
+        //    clockwise = 0;
+        //    ap_xy = ap_xy + w;
+        //}
+        //else if ((ap_xy < w_max - w) and (!clockwise))
+        //{
+        //    ap_xy = ap_xy + w;
+        //}
+        //else if ((ap_xy >= w_max + w) && (!clockwise))
+        //{
+        //    clockwise = 1;
+        //    ap_xy = ap_xy - w;
+        //}
+
+        ////ap_prev_xz = ap_xz;
+        //if ((ap_xz > wz_min + wz) && clockwise_z)
+        //{
+        //    ap_xz = ap_xz - wz;
+        //}
+        //else if ((ap_xz <= wz_min - wz) && clockwise_z)
+        //{
+        //    clockwise_z = 0;
+        //    ap_xz = ap_xz + wz;
+        //}
+        //else if ((ap_xz < wz_max - wz) and (!clockwise_z))
+        //{
+        //    ap_xz = ap_xz + wz;
+        //}
+        //else if ((ap_xz >= wz_min + wz) && (!clockwise_z))
+        //{
+        //    clockwise_z = 1;
+        //    ap_xz = ap_xz - wz;
+        //}
        
         //dw = ap_xy - ap_prev_xy;
         //dw_z = ap_xz - ap_prev_xz;
@@ -1212,17 +1279,58 @@ void OPS()
 
     //cout << "Угол по Z = " << ap_xz << endl;
 
-    if (Aircrafts.captured && ((ap_xy - Aircrafts.A0) > pi / 90))
+    if (Aircrafts.captured && ((Aircrafts.A0 - ap_xy_r) < - pi / 90) && ((Aircrafts.A0 - ap_xy_r) != 0))
+    {
+        mtx.lock();
+        Aircrafts.A0 = Aircrafts.A0 + Aircrafts.ws;
+        mtx.unlock();
+        ap_xy = ap_xy + Aircrafts.ws;
+    }
+    else if (Aircrafts.captured && ((Aircrafts.A0 - ap_xy_r) > pi / 90) && ((Aircrafts.A0 - ap_xy_r) != 0))
+    {
+        mtx.lock();
+        Aircrafts.A0 = Aircrafts.A0 - Aircrafts.ws;
+        mtx.unlock();
+        ap_xy = ap_xy - Aircrafts.ws;
+    }
+    if (Aircrafts.captured && ((Aircrafts.A0 - ap_xy_r) < -pi / 15) && ((Aircrafts.A0 - ap_xy_r) != 0))
     {
         mtx.lock();
         Aircrafts.A0 = Aircrafts.A0 + Aircrafts.w;
         mtx.unlock();
+        ap_xy = ap_xy + Aircrafts.w;
     }
-    else if (Aircrafts.captured && ((ap_xy - Aircrafts.A0) < -pi / 90))
+    else if (Aircrafts.captured && ((Aircrafts.A0 - ap_xy_r) > pi / 15) && ((Aircrafts.A0 - ap_xy_r) != 0))
     {
         mtx.lock();
         Aircrafts.A0 = Aircrafts.A0 - Aircrafts.w;
         mtx.unlock();
+        ap_xy = ap_xy - Aircrafts.w;
+    }
+
+    //cout << "D = " << Aircrafts.D << " ; H = " << Aircrafts.height << endl;
+    //cout << "IdPPM = " << Aircrafts.IdPPM << endl;
+    //cout << "A0 = " << Aircrafts.A0 << endl;
+    //cout << "ap_xy_r = " << ap_xy_r << " ; ap_xy = " << ap_xy << endl;
+    //cout << "ap_xz_r = " << ap_xz_r << " ; ap_xz = " << ap_xz << endl;
+    //cout << "longitude = " << Aircrafts.longitude << endl;
+    //cout << "latitude = " << Aircrafts.latitude << endl;
+
+    if (Aircrafts.D < 1000)
+    {
+        mtx.lock();
+        Aircrafts.IdPPM = Aircrafts.IdPPM + 1;
+        Aircrafts.captured = 0;
+        mtx.unlock();
+        if (Aircrafts.IdPPM <= 2)
+        {
+            cout << "Поиск новой цели" << endl;
+        }
+        else
+        {
+            cout << "Пролетели последний пункт" << endl;
+        }
+        
     }
     
 }
@@ -1257,6 +1365,7 @@ int main()
     mtx.lock();
     Aircrafts.V0 = 500;
     Aircrafts.w = 0.1;
+    Aircrafts.ws = 0.1;
     Aircrafts.A0 = 0;
     Aircrafts.height = 4;
     Aircrafts.latitude = 0;
@@ -1272,23 +1381,25 @@ int main()
 
     PPM PPM1;
     PPM1.height = 0;
-    PPM1.longitude = 100;
-    PPM1.latitude = 0;
+    PPM1.longitude = 10000;
+    PPM1.latitude = 1000;
     PPMs[0] = PPM1;
 
     PPM PPM2;
     PPM2.height = 0;
-    PPM2.longitude = 2000;
-    PPM2.latitude = 0;
+    PPM2.longitude = 20000;
+    PPM2.latitude = 1000;
     PPMs[1] = PPM2;
 
     PPM PPM3;
     PPM3.height = 0;
-    PPM3.longitude = 3000;
-    PPM3.latitude = 150;
+    PPM3.longitude = 30000;
+    PPM3.latitude = 3000;
     PPMs[2] = PPM3;
 
     mtx.unlock();
+
+    ap_xy = Aircrafts.A0;
 
     CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)ModelINS, NULL, NULL, NULL);
     //CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)SendDataINS, NULL, NULL, NULL);
