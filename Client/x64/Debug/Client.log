@@ -1,3 +1,8 @@
 ﻿  Client.cpp
-C:\Users\parsh\source\repos\Client\Client\Client.cpp(195,46): warning C4244: +=: преобразование "double" в "int", возможна потеря данных
-  Client.vcxproj -> C:\Users\parsh\source\repos\Client\x64\Debug\Client.exe
+C:\Users\parsh\source\repos\asbis_client\Client\Client.cpp(199,19): warning C4305: инициализация: усечение из "double" в "float"
+C:\Users\parsh\source\repos\asbis_client\Client\Client.cpp(212,17): warning C4305: инициализация: усечение из "double" в "float"
+C:\Users\parsh\source\repos\asbis_client\Client\Client.cpp(213,18): warning C4305: инициализация: усечение из "double" в "float"
+C:\Users\parsh\source\repos\asbis_client\Client\Client.cpp(250,23): warning C4244: +=: преобразование "double" в "int", возможна потеря данных
+C:\Users\parsh\source\repos\asbis_client\Client\Client.cpp(969,23): warning C4244: =: преобразование "double" в "float", возможна потеря данных
+C:\Users\parsh\source\repos\asbis_client\Client\Client.cpp(1255,22): warning C4305: =: усечение из "double" в "float"
+  Client.vcxproj -> C:\Users\parsh\source\repos\asbis_client\x64\Debug\Client.exe

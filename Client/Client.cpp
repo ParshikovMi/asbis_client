@@ -11,8 +11,8 @@
 #include <stdlib.h>
 #include <windows.h>
 //#include "KMLTransformer.h"
-#pragma comment(lib, "libkmlbase.lib")
-#pragma comment(lib, "libkmldom.lib")
+//#pragma comment(lib, "libkmlbase.lib")
+//#pragma comment(lib, "libkmldom.lib")
 #pragma comment(lib, "ws2_32.lib")
 
 using namespace std;
@@ -41,7 +41,12 @@ public:
     float roll; //Крен
     float pitch; //Тангаж
     float yaw; //Рысканье
-
+    int IdPPM; //Номер ППМ
+    float err_xy;
+    float err_xz;
+    int captured;
+    float w;
+    float D;
 };
 
 //ARINC-429
@@ -193,6 +198,30 @@ queue <protocol> MesBufSNS;
 int fi, alfa, INS_flag_navig, SNS_flag_navig;
 float pi = 3.14159;
 SYSTEMTIME st;
+PPM PPMs[3];
+Aircraft Aircrafts;
+
+float latitude_related = 0;
+float longitude_related = 0;
+float height_related = 0;
+
+// Линия визирования
+float ap_xy = 0;
+float ap_xz = 0;
+float dpl = 0;
+float w = 0.0005;
+float wz = 0.0035;
+float wz_min = -pi / 2;
+float wz_max = 0;
+bool clockwise = 1;
+bool clockwise_z = 1;
+float err_xy = 1000;
+float err_xz = 1000;
+
+float dw = 0;
+float dw_z = 0;
+float ap_prev_xy = 0;
+float ap_prev_xz = 0;
 
 int calc(double price, int high, int col, double val) // цена старшего разряда, старший разряд, число значащих разрядов, значение
 {
@@ -284,6 +313,23 @@ public:
             if (chrono::steady_clock::now() > tend)
             {
                 f(Mes);
+                stop = 1;
+            }
+        }
+    }
+};
+
+class TimerAircraft
+{
+public:
+    void update(void (*f) (), chrono::steady_clock::time_point tend)
+    {
+        int stop = 0;
+        while (stop == 0)
+        {
+            if (chrono::steady_clock::now() > tend)
+            {
+                f();
                 stop = 1;
             }
         }
@@ -532,6 +578,7 @@ struct INS
             st.wMilliseconds);
 
         cout << "ИНС: Запущен режим навигации\n";
+        INS_flag_navig = 1;
 
         PackageArinc PackageMes{};
         PackageMes.mes3.address = oct_to_dec(270); // Формирование слова данных
@@ -726,6 +773,7 @@ struct SNS
             st.wMilliseconds);
 
         cout << "СНС: Запущен режим навигации\n";
+        SNS_flag_navig = 1;
 
         fi = 24;
         alfa = 32;
@@ -889,207 +937,312 @@ void SendDataSNS()
 void ModelINS()
 {
     INS INS;
-    INS.Control();
-    INS.Preparation();
-    INS_flag_navig = 1;
+    //INS.Control();
+    //INS.Preparation();
     INS.Navigation();
 }
 
 void ModelSNS()
 {
     SNS SNS;
-    SNS.Control();
-    SNS_flag_navig = 1;
+    //SNS.Control();
     SNS.Navigation();
 }
 
-void ModelAircraft(Aircraft Aircraft, PPM PPMs[])
+void Fly()
 {
-    while ((INS_flag_navig == 0) && (SNS_flag_navig == 0))
+    
+    mtx.lock();
+    Aircrafts.longitude = Aircrafts.longitude + 10000*(Aircrafts.V0 / 3600000) * cos(Aircrafts.pitch) * sin(Aircrafts.A0);
+    Aircrafts.latitude = Aircrafts.latitude + 10000*(Aircrafts.V0 / 3600000) * cos(Aircrafts.pitch) * cos(Aircrafts.A0);
+    if (Aircrafts.height < 6)
+    {
+        Aircrafts.height = Aircrafts.height + 10000*(Aircrafts.V0 / 3600000) * sin(Aircrafts.pitch);
+    }
+    else
+    {
+        Aircrafts.pitch = 0;
+    }
+    mtx.unlock();
+
+    // Дальность
+    Aircrafts.D = sqrt(pow((Aircrafts.latitude - PPMs[Aircrafts.IdPPM].latitude), 2) + pow((Aircrafts.longitude - PPMs[Aircrafts.IdPPM].longitude), 2));
+    cout << "D = " << Aircrafts.D << " ; H = " << Aircrafts.height << " ; IdPPM = " << Aircrafts.IdPPM << endl;
+    
+}
+
+void ModelAircraft()
+{
+    while ((INS_flag_navig == 0) || (SNS_flag_navig == 0))
     {
         int p = 0;
     }
-
-    float latitude_related = 0;
-    float longitude_related = 0;
-    float height_related = 0;
-
-    int i;
+    int i = Aircrafts.IdPPM;
 
     while (i != 2)
     {
-        // Связанная система координат
-        latitude_related = PPMs[i].latitude - Aircraft.latitude;
-        longitude_related = PPMs[i].longitude - Aircraft.longitude;
-        height_related = PPMs[i].height - Aircraft.height;
+        chrono::steady_clock::time_point tend = chrono::steady_clock::now() + chrono::milliseconds(1);
 
-        // Дальность
-        float D = sqrt(pow((Aircraft.latitude - PPMs[i].latitude), 2) + pow((Aircraft.longitude - PPMs[i].longitude), 2));
-        float D_lat = abs(Aircraft.latitude - PPMs[i].latitude);
-        float D_lon = abs(Aircraft.longitude - PPMs[i].longitude);
+        void(*fly)();
+        fly = Fly;
+
+        TimerAircraft TimerAir;
+        TimerAir.update(fly, tend);
 
     }
 }
 
-void ModelOPS(Aircraft Aircraft, PPM PPMs[])
+void OPS()
 {
-    while ((INS_flag_navig == 0) && (SNS_flag_navig == 0))
+
+    // Связанная система координат
+    longitude_related = PPMs[Aircrafts.IdPPM].longitude - Aircrafts.longitude;
+    latitude_related = PPMs[Aircrafts.IdPPM].latitude - Aircrafts.latitude;
+    height_related = PPMs[Aircrafts.IdPPM].height - Aircrafts.height;
+
+    float ap_xy_r = atan2(latitude_related, longitude_related);
+    float ap_xz_r = atan2(height_related, longitude_related);
+
+    ap_xy = Aircrafts.A0 + ap_xy;
+
+    float w_max = Aircrafts.A0 + pi / 4;
+    float w_min = Aircrafts.A0 + (-pi / 4);
+
+    if (ap_xy_r >= w_max)
+    {
+        mtx.lock();
+        Aircrafts.A0 = Aircrafts.A0 + Aircrafts.w;
+        mtx.unlock();
+    }
+    if (ap_xy_r <= w_min)
+    {
+        mtx.lock();
+        Aircrafts.A0 = Aircrafts.A0 - Aircrafts.w;
+        mtx.unlock();
+    }
+
+    if (!Aircrafts.captured)
+    {
+        //if (abs(err_xy) > abs(ap_xy - ap_xy_r))
+        //{
+        //    clockwise = (!clockwise);
+        //    err_xy = ap_xy - ap_xy_r;
+        //}
+        //if (abs(err_xz) > abs(ap_xz - ap_xz_r))
+        //{
+        //    clockwise_z = (!clockwise_z);
+        //    err_xz = ap_xz - ap_xz_r;
+        //}
+
+        //ap_prev_xy = ap_xy;
+        if ((ap_xy > w_min + w) && clockwise)
+        {
+            ap_xy = ap_xy - w;
+        }
+        else if ((ap_xy <= w_min - w) && clockwise)
+            {
+                clockwise = 0;
+                ap_xy = ap_xy + w;
+            }
+        else if ((ap_xy < w_max - w) and (!clockwise))
+            {
+                ap_xy = ap_xy + w;
+            }
+        else if ((ap_xy >= w_max + w) && (!clockwise))
+            {
+                clockwise = 1;
+                ap_xy = ap_xy - w;
+            }
+
+        //ap_prev_xz = ap_xz;
+        if ((ap_xz > wz_min + wz) && clockwise_z)
+        {
+            ap_xz = ap_xz - wz;
+        }
+        else if ((ap_xz <= wz_min - wz) && clockwise_z)
+            {
+                clockwise_z = 0;
+                ap_xz = ap_xz + wz;
+            }
+        else if ((ap_xz < wz_max - wz) and (!clockwise_z))
+            {
+                ap_xz = ap_xz + wz;
+            }
+        else if ((ap_xz >= wz_min + wz) && (!clockwise_z))
+            {
+                clockwise_z = 1;
+                ap_xz = ap_xz - wz;
+            }
+
+        if ((ap_xy < ap_xy_r + w) && (ap_xy > ap_xy_r - w) && (ap_xz < ap_xz_r + wz) && (ap_xz > ap_xz_r - wz))
+        {
+            mtx.lock();
+            Aircrafts.captured = 1;
+            mtx.unlock();
+            cout << "Цель захвачена!" << endl;
+        }
+    }
+
+    if (Aircrafts.captured)
+    {
+        //if (abs(Aircraft.err_xy) > abs(ap_xy - ap_xy_r))
+        //{
+        //    clockwise = (!clockwise);
+        //    mtx.lock();
+        //    Aircraft.err_xy = ap_xy - ap_xy_r;
+        //    mtx.unlock();
+        //}
+        //if (abs(Aircraft.err_xz) > abs(ap_xz - ap_xz_r))
+        //{
+        //    clockwise_z = (!clockwise_z);
+        //    mtx.lock();
+        //    Aircraft.err_xz = ap_xz - ap_xz_r;
+        //    mtx.unlock();
+        //}
+        float diff = 0;
+        float diff_z = 0;
+
+        if ((ap_xy_r < w_max) && (ap_xy_r > w_min) && (ap_xz_r < wz_max) && (ap_xz_r > wz_min))
+        {
+            diff = ap_xy_r - ap_xy;
+            if (diff > 0)
+            {
+                clockwise = 0;
+                mtx.lock();
+                Aircrafts.A0 = Aircrafts.A0 + Aircrafts.w;
+                mtx.unlock();
+                ap_xy = Aircrafts.A0 + ap_xy + w;
+            }
+            else if (diff < 0)
+            {
+                clockwise = 1;
+                mtx.lock();
+                Aircrafts.A0 = Aircrafts.A0 - Aircrafts.w;
+                mtx.unlock();
+                ap_xy = Aircrafts.A0 + ap_xy - w;
+            }
+            diff_z = ap_xz_r - ap_xz;
+            if (diff_z > 0)
+            {
+                clockwise_z = 0;
+                ap_xz = ap_xz + wz;
+            }
+            else if (diff_z < 0)
+            {
+                clockwise_z = 1;
+                ap_xz = ap_xz - wz;
+            }
+        }
+        else
+        {
+            mtx.lock();
+            Aircrafts.captured = 0;
+            cout << "Цель потеряна!" << endl;
+            mtx.unlock();
+        }
+       
+        //dw = ap_xy - ap_prev_xy;
+        //dw_z = ap_xz - ap_prev_xz;
+        //ap_prev_xy = ap_xy;
+        //ap_prev_xz = ap_xz;
+
+        //if ((dw <= 0) && (ap_xy > w_min + w))
+        //{
+        //    ap_xy = ap_xy - w;
+        //}
+        //else if ((dw > 0) && (ap_xy < w_max - w))
+        //{
+        //    ap_xy = ap_xy + w;
+        //}
+
+        //if (!(ap_xy < ap_xy_r + w) && (ap_xy > ap_xy_r))
+        //{
+        //    dw = -1 * dw;
+        //    if ((dw > 0) && (ap_xy < w_max - w))
+        //    {
+        //        ap_xy = ap_xy + w;
+        //    }
+        //    else if ((dw <= 0) && (ap_xy > w_max + w))
+        //    {
+        //        ap_xy = ap_xy - w;
+        //    }
+        //}
+
+        //if ((dw_z > 0) && (ap_xz < wz_max - w))
+        //{
+        //    ap_xz = ap_xz + w;
+        //}
+        //else if ((dw_z <= 0) && (ap_xz > w_min + w))
+        //{
+        //    ap_xz = ap_xz - w;
+        //}
+
+        //if (!(ap_xz < ap_xz_r + w) && (ap_xz > ap_xz_r))
+        //{
+        //    dw_z = -1 * dw_z;
+        //    if ((dw_z > 0) && (ap_xz < wz_max - w))
+        //    {
+        //        ap_xz = ap_xz + w;
+        //    }
+        //    else if ((dw_z < 0) && (ap_xz > w_max + w))
+        //    {
+        //        ap_xz = ap_xz - w;
+        //    }
+        //}
+    
+        //if ((ap_xy < ap_xy_r + w) && (ap_xy > ap_xy_r - w) && (ap_xz < ap_xz_r + wz) && (ap_xz > ap_xz_r - wz))
+        //{
+        //    mtx.lock();
+        //    Aircrafts.captured = 1;
+        //    mtx.unlock();
+        //}
+        //else
+        //{
+        //    mtx.lock();
+        //    Aircrafts.captured = 0;
+        //    cout << "Цель потеряна!" << endl;
+        //    mtx.unlock();
+        //}
+
+    }
+
+    //cout << "Угол по Z = " << ap_xz << endl;
+
+    if (Aircrafts.captured && ((ap_xy - Aircrafts.A0) > pi / 90))
+    {
+        mtx.lock();
+        Aircrafts.A0 = Aircrafts.A0 + Aircrafts.w;
+        mtx.unlock();
+    }
+    else if (Aircrafts.captured && ((ap_xy - Aircrafts.A0) < -pi / 90))
+    {
+        mtx.lock();
+        Aircrafts.A0 = Aircrafts.A0 - Aircrafts.w;
+        mtx.unlock();
+    }
+    
+}
+
+void ModelOPS()
+{
+
+    while ((INS_flag_navig == 0) || (SNS_flag_navig == 0))
     {
         int p = 0;
     }
-
-    float latitude_related = 0;
-    float longitude_related = 0;
-    float height_related = 0;
-
-    int i;
+    int i = Aircrafts.IdPPM;
 
     while (i != 2)
     {
-        // Связанная система координат
-        latitude_related = PPMs[i].latitude - Aircraft.latitude;
-        longitude_related = PPMs[i].longitude - Aircraft.longitude;
-        height_related = PPMs[i].height - Aircraft.height;
+        chrono::steady_clock::time_point tend = chrono::steady_clock::now() + chrono::milliseconds(1);
 
-        // Линия визирования
-        float ap_xy = Aircraft.A0;
-        float ap_xz = 0;
-        float dpl = 0;
-        float ap_xy_r = atan2(longitude_related, latitude_related);
-        float ap_xz_r = atan2(height_related, latitude_related);
-        bool captured = 0;
-        float w = 0.001;
-        float w_max = pi / 4;
-        float w_min = -pi / 4;
-        float wz_min = 0;
-        float wz_max = pi / 2;
-        bool clockwise = 1;
-        bool clockwise_z = 1;
-        float err_xy = 1000;
-        float err_xz = 1000;
+        void(*ops)();
+        ops = OPS;
 
-        float ap_prev = 0;
-        float ap_prev_z = 0;
-        float dw = 0;
-
-        if (!captured)
-        {
-            ap_prev = ap_xy;
-            if (abs(err_xy) > abs(ap_xy - ap_xy_r))
-            {
-                clockwise = (!clockwise);
-                err_xy = ap_xy - ap_xy_r;
-            }
-            if (abs(err_xz) > abs(ap_xz - ap_xz_r))
-            {
-                clockwise_z = (!clockwise_z);
-                err_xz = ap_xz - ap_xz_r;
-            }
-            
-            if ((ap_xy < w_max - w) && clockwise)
-            {
-                ap_xy = ap_xy + w;
-            }
-            else if ((ap_xy >= w_max - w) && clockwise)
-            {
-                clockwise = 0;
-                ap_xy = ap_xy - w;
-            }
-            else if ((ap_xy > w_min + w) and (!clockwise))
-            {
-                ap_xy = ap_xy - w;
-            }
-            else if ((ap_xy <= w_min + w) && (!clockwise))
-            {
-                clockwise = 1;
-                ap_xy = ap_xy + w;
-            }
-
-            if ((ap_xz < wz_max - w) && clockwise_z)
-            {
-                ap_xz = ap_xz + w;
-            }
-            else if ((ap_xz >= wz_max - w) && clockwise_z)
-            {
-                clockwise_z = 0;
-                ap_xz = ap_xz - w;
-            }
-            else if ((ap_xz > wz_min + w) and (!clockwise_z))
-            {
-                ap_xz = ap_xz - w;
-            }
-            else if ((ap_xz <= wz_min + w) && (!clockwise_z))
-            {
-                clockwise_z = 1;
-                ap_xz = ap_xz + w;
-            }
-
-            if ((ap_xy < ap_xy_r + w) && (ap_xy > ap_xy_r - w) && (ap_xz < ap_xz_r + w) && (ap_xz > ap_xz_r - w))
-            {
-                captured = 1;
-                cout << "Цель захвачена!" << endl;
-            }
-        }
-
-        if (captured)
-        {
-            cout << "Удержание цели" << endl;
-
-            ap_prev = ap_xy;
-            if (abs(err_xy) > abs(ap_xy - ap_xy_r))
-            {
-                clockwise = (!clockwise);
-                err_xy = ap_xy - ap_xy_r;
-            }
-            if (abs(err_xz) > abs(ap_xz - ap_xz_r))
-            {
-                clockwise_z = (!clockwise_z);
-                err_xz = ap_xz - ap_xz_r;
-            }
-
-            if ((ap_xy < w_max - w) && clockwise)
-            {
-                ap_xy = ap_xy + w;
-            }
-            else if ((ap_xy >= w_max - w) && clockwise)
-            {
-                clockwise = 0;
-                ap_xy = ap_xy - w;
-            }
-            else if ((ap_xy > w_min + w) and (!clockwise))
-            {
-                ap_xy = ap_xy - w;
-            }
-            else if ((ap_xy <= w_min + w) && (!clockwise))
-            {
-                clockwise = 1;
-                ap_xy = ap_xy + w;
-            }
-
-            if ((ap_xz < wz_max - w) && clockwise_z)
-            {
-                ap_xz = ap_xz + w;
-            }
-            else if ((ap_xz >= wz_max - w) && clockwise_z)
-            {
-                clockwise_z = 0;
-                ap_xz = ap_xz - w;
-            }
-            else if ((ap_xz > wz_min + w) and (!clockwise_z))
-            {
-                ap_xz = ap_xz - w;
-            }
-            else if ((ap_xz <= wz_min + w) && (!clockwise_z))
-            {
-                clockwise_z = 1;
-                ap_xz = ap_xz + w;
-            }
-
-        }
+        TimerAircraft TimerAir;
+        TimerAir.update(ops, tend);
 
     }
-
-
 
 }
 
@@ -1097,43 +1250,46 @@ int main()
 {
     setlocale(LC_ALL, "Russian");
 
-    Aircraft Aircraft;
-
     mtx.lock();
-    Aircraft.V0 = 5;
-    Aircraft.A0 = 0;
-    Aircraft.height = 0;
-    Aircraft.latitude = 0;
-    Aircraft.longitude = 0;
-    Aircraft.pitch = 0;
-    Aircraft.roll = 0;
-    Aircraft.yaw = 0;
-    mtx.unlock();
-
-    PPM PPMs[3];
+    Aircrafts.V0 = 500;
+    Aircrafts.w = 0.1;
+    Aircrafts.A0 = 0;
+    Aircrafts.height = 4;
+    Aircrafts.latitude = 0;
+    Aircrafts.longitude = 0;
+    Aircrafts.pitch = 45;
+    Aircrafts.roll = 0;
+    Aircrafts.yaw = 0;
+    Aircrafts.IdPPM = 0;
+    Aircrafts.err_xy = 1000;
+    Aircrafts.err_xz = 1000;
+    Aircrafts.captured = 0;
+    Aircrafts.D = 0;
 
     PPM PPM1;
     PPM1.height = 0;
-    PPM1.latitude = 50;
-    PPM1.longitude = 10;
+    PPM1.longitude = 100;
+    PPM1.latitude = 0;
     PPMs[0] = PPM1;
 
     PPM PPM2;
     PPM2.height = 0;
-    PPM2.latitude = 100;
-    PPM2.longitude = 20;
+    PPM2.longitude = 2000;
+    PPM2.latitude = 0;
     PPMs[1] = PPM2;
 
     PPM PPM3;
     PPM3.height = 0;
+    PPM3.longitude = 3000;
     PPM3.latitude = 150;
-    PPM3.longitude = 30;
     PPMs[2] = PPM3;
 
+    mtx.unlock();
+
     CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)ModelINS, NULL, NULL, NULL);
-    CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)SendDataINS, NULL, NULL, NULL);
+    //CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)SendDataINS, NULL, NULL, NULL);
     CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)ModelSNS, NULL, NULL, NULL);
-    CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)SendDataSNS, NULL, NULL, NULL);
+    //CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)SendDataSNS, NULL, NULL, NULL);
 
     CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)ModelAircraft, NULL, NULL, NULL);
     CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)ModelOPS, NULL, NULL, NULL);
