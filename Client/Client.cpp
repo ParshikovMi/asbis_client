@@ -10,9 +10,7 @@
 #include <ws2tcpip.h>
 #include <stdlib.h>
 #include <windows.h>
-//#include "KMLTransformer.h"
-//#pragma comment(lib, "libkmlbase.lib")
-//#pragma comment(lib, "libkmldom.lib")
+#include <KMLTransformer.h>
 #pragma comment(lib, "ws2_32.lib")
 
 using namespace std;
@@ -1023,16 +1021,22 @@ void OPS()
 
     if (!Aircrafts.captured)
     {
-        //if (abs(err_xy) > abs(ap_xy - ap_xy_r))
-        //{
-        //    clockwise = (!clockwise);
-        //    err_xy = ap_xy - ap_xy_r;
-        //}
-        //if (abs(err_xz) > abs(ap_xz - ap_xz_r))
-        //{
-        //    clockwise_z = (!clockwise_z);
-        //    err_xz = ap_xz - ap_xz_r;
-        //}
+        if (ap_xy < ap_xy_r)
+        {
+            clockwise = 0;
+        }
+        else
+        {
+            clockwise = 1;
+        }
+        if (ap_xz > ap_xz_r)
+        {
+            clockwise_z = 1;
+        }
+        else
+        {
+            clockwise_z = 0;
+        }
 
         //ap_prev_xy = ap_xy;
         if ((ap_xy > w_min + w) && clockwise)
