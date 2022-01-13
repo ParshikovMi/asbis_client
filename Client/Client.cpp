@@ -26,6 +26,22 @@ struct PPM
     float height; //Высота
 };
 
+//ASP
+
+struct ASP
+{
+    float latitude; //Широта
+    float longitude; //Долгота 
+    float height; //Высота
+    float v0; //Начальная скорость полёта
+    float A; //Относ
+    float TH; //Время падения
+    int drop;
+    int use;
+    float q;
+    int id;
+};
+
 //Aircraft
 
 class Aircraft
@@ -194,10 +210,14 @@ condition_variable cv;
 mutex mtx;
 queue <protocol> MesBuf;
 queue <protocol> MesBufSNS;
-int fi, alfa, INS_flag_navig, SNS_flag_navig;
+int fi, alfa, INS_flag_navig, SNS_flag_navig, start;
 float pi = 3.14159;
+float g = -0.98;
+float c = 0.9;
+int a = 1000;
 SYSTEMTIME st;
 PPM PPMs[3];
+ASP ASPs[3];
 Aircraft Aircrafts;
 
 float latitude_related = 0;
@@ -329,6 +349,23 @@ public:
             if (chrono::steady_clock::now() > tend)
             {
                 f();
+                stop = 1;
+            }
+        }
+    }
+};
+
+class TimerASP
+{
+public:
+    void update(void (*f) (ASP), chrono::steady_clock::time_point tend, ASP ASP)
+    {
+        int stop = 0;
+        while (stop == 0)
+        {
+            if (chrono::steady_clock::now() > tend)
+            {
+                f(ASP);
                 stop = 1;
             }
         }
@@ -578,6 +615,8 @@ struct INS
 
         cout << "ИНС: Запущен режим навигации\n";
         INS_flag_navig = 1;
+        cout << "Пуск разрешён?" << endl;
+        cin >> start;
 
         PackageArinc PackageMes{};
         PackageMes.mes3.address = oct_to_dec(270); // Формирование слова данных
@@ -952,26 +991,65 @@ void Fly()
 {
     
     mtx.lock();
-    Aircrafts.longitude = Aircrafts.longitude + 10000*(Aircrafts.V0 / 3600000) * cos(Aircrafts.pitch) * cos(Aircrafts.A0);
-    Aircrafts.latitude = Aircrafts.latitude + 10000*(Aircrafts.V0 / 3600000) * cos(Aircrafts.pitch) * sin(Aircrafts.A0);
-    if (Aircrafts.height < 6)
+    Aircrafts.longitude = Aircrafts.longitude + a*(Aircrafts.V0 / 3600000) * cos(Aircrafts.pitch) * cos(Aircrafts.A0);
+    Aircrafts.latitude = Aircrafts.latitude + a*(Aircrafts.V0 / 3600000) * cos(Aircrafts.pitch) * sin(Aircrafts.A0);
+    if (Aircrafts.height < 10)
     {
-        Aircrafts.height = Aircrafts.height + 10000*(Aircrafts.V0 / 3600000) * sin(Aircrafts.pitch);
+        Aircrafts.height = Aircrafts.height + a*(Aircrafts.V0 / 3600000) * sin(Aircrafts.pitch);
     }
     else
     {
         Aircrafts.pitch = 0;
     }
-    mtx.unlock();
 
     // Дальность
     Aircrafts.D = sqrt(pow((Aircrafts.latitude - PPMs[Aircrafts.IdPPM].latitude), 2) + pow((Aircrafts.longitude - PPMs[Aircrafts.IdPPM].longitude), 2));
+    mtx.unlock();
     
+}
+
+void drop_v(ASP ASP)
+{
+    float Vh = ASP.TH / ASP.height;
+    float Va = ASP.TH / ASP.A;
+    while (ASP.height > 0)
+    {
+        mtx.lock();
+        ASP.longitude = ASP.longitude + a * (Va / 3600000) * cos(0) * cos(ASP.q);
+        ASP.latitude = ASP.latitude + a * (Va / 3600000) * cos(0) * sin(ASP.q);
+        ASP.height = ASP.height - a * (Vh / 3600000);
+        mtx.unlock();
+    }
+    float err = sqrt(pow((ASP.latitude - PPMs[ASP.id].latitude), 2) + pow((ASP.longitude - PPMs[ASP.id].longitude), 2));
+    cout << "АСП id " << ASP.id << " упала с промахом " << err << endl;
+}
+
+void drop()
+{
+    int i;
+
+    for (i = 0; i < 3; i++)
+    {
+        if ((ASPs[i].drop == 1) && (ASPs[i].use == 0))
+        {
+            mtx.lock();
+            ASPs[i].use = 1;
+            mtx.unlock();
+
+            chrono::steady_clock::time_point tend = chrono::steady_clock::now() + chrono::milliseconds(1);
+
+            void(*asp_drop)(ASP);
+            asp_drop = drop_v;
+
+            TimerASP TimerASPs;
+            TimerASPs.update(asp_drop, tend, ASPs[i]);
+        }
+    }
 }
 
 void ModelAircraft()
 {
-    while ((INS_flag_navig == 0) || (SNS_flag_navig == 0))
+    while ((INS_flag_navig == 0) || (SNS_flag_navig == 0) || (start == 0))
     {
         int p = 0;
     }
@@ -1316,9 +1394,28 @@ void OPS()
     //cout << "longitude = " << Aircrafts.longitude << endl;
     //cout << "latitude = " << Aircrafts.latitude << endl;
 
-    if (Aircrafts.D < 1000)
+    float H = Aircrafts.height;
+    float A = Aircrafts.V0 * (sqrt(2 * H) / g) * (1 - ((exp(-0.000106 * H) * c * H) / 6) * (1 + (0.000031 * H) / 5));
+    float TH = (sqrt(2 * H) / g) * (1 - ((exp(-0.000106 * H) * c * H) / 6) * (1 + (0.000063 * H) / 5));
+    //cout << "A: " << A << endl;
+
+
+    if (Aircrafts.D <= A)
     {
         mtx.lock();
+        ASPs[Aircrafts.IdPPM].height = Aircrafts.height;
+        ASPs[Aircrafts.IdPPM].longitude = Aircrafts.longitude;
+        ASPs[Aircrafts.IdPPM].latitude = Aircrafts.latitude;
+        ASPs[Aircrafts.IdPPM].v0 = Aircrafts.V0;
+        ASPs[Aircrafts.IdPPM].A = A;
+        ASPs[Aircrafts.IdPPM].TH = TH;
+        ASPs[Aircrafts.IdPPM].drop = 1;
+        ASPs[Aircrafts.IdPPM].q = Aircrafts.A0;
+        ASPs[Aircrafts.IdPPM].id = Aircrafts.IdPPM;
+
+        cout << "Сброс бомбы id " << ASPs[Aircrafts.IdPPM].id << endl;
+        CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)drop, NULL, NULL, NULL);
+
         Aircrafts.IdPPM = Aircrafts.IdPPM + 1;
         Aircrafts.captured = 0;
         mtx.unlock();
@@ -1338,7 +1435,7 @@ void OPS()
 void ModelOPS()
 {
 
-    while ((INS_flag_navig == 0) || (SNS_flag_navig == 0))
+    while ((INS_flag_navig == 0) || (SNS_flag_navig == 0) || (start == 0))
     {
         int p = 0;
     }
@@ -1379,23 +1476,54 @@ int main()
     Aircrafts.captured = 0;
     Aircrafts.D = 0;
 
-    PPM PPM1;
+    PPM PPM1{};
     PPM1.height = 0;
     PPM1.longitude = 10000;
     PPM1.latitude = 1000;
     PPMs[0] = PPM1;
 
-    PPM PPM2;
+    PPM PPM2{};
     PPM2.height = 0;
     PPM2.longitude = 20000;
     PPM2.latitude = 1000;
     PPMs[1] = PPM2;
 
-    PPM PPM3;
+    PPM PPM3{};
     PPM3.height = 0;
     PPM3.longitude = 30000;
     PPM3.latitude = 3000;
     PPMs[2] = PPM3;
+
+    ASP ASP1{};
+    ASP1.height = Aircrafts.height;
+    ASP1.longitude = Aircrafts.longitude;
+    ASP1.latitude = Aircrafts.latitude;
+    ASP1.v0 = Aircrafts.V0;
+    ASP1.drop = 0;
+    ASP1.use = 0;
+    ASP1.q = 0;
+    ASP1.id = 0;
+    ASP ASP2{};
+    ASP2.height = Aircrafts.height;
+    ASP2.longitude = Aircrafts.longitude;
+    ASP2.latitude = Aircrafts.latitude;
+    ASP2.v0 = Aircrafts.V0;
+    ASP2.drop = 0;
+    ASP2.use = 0;
+    ASP2.q = 0;
+    ASP2.id = 1;
+    ASP ASP3{};
+    ASP3.height = Aircrafts.height;
+    ASP3.longitude = Aircrafts.longitude;
+    ASP3.latitude = Aircrafts.latitude;
+    ASP3.v0 = Aircrafts.V0;
+    ASP3.drop = 0;
+    ASP3.use = 0;
+    ASP3.q = 0;
+    ASP3.id = 2;
+    ASPs[0] = ASP1;
+    ASPs[1] = ASP2;
+    ASPs[2] = ASP3;
 
     mtx.unlock();
 
