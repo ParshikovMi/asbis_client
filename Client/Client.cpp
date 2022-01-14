@@ -10,12 +10,80 @@
 #include <ws2tcpip.h>
 #include <stdlib.h>
 #include <windows.h>
-//#include <KMLTransformer.h>
+#include <iostream>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <fstream>
+
+#include "kml/dom.h"
+#include "kml/engine.h"
+#include "kml/base/file.h"
+
+#pragma comment(lib, "libkmlbase.lib")
+#pragma comment(lib, "libkmldom.lib")
+
+#define M_PI 3.14159265358979323846
+
 #pragma comment(lib, "ws2_32.lib")
 
+using namespace kmldom;
+//using namespace System::Xml;
 using namespace std;
 
 #pragma warning(disable: 4996)
+
+//KML
+
+class KML_Transformer
+{
+private:
+    double home_point[3];
+
+    //// Get the factory singleton to create KML elements.
+    KmlFactory* factory = KmlFactory::GetFactory();
+
+    // Create <kml> and give it <Placemark>.
+    KmlPtr kml = factory->CreateKml();
+    kmldom::DocumentPtr document = factory->CreateDocument();
+
+    std::fstream write;
+    std::string filename;
+    std::string xml;
+
+public:
+    void CreateKML(std::string filename_inp, double home_point_input[3]);
+    void KMLNewValue(int waypoint_num, float input[3]);
+};
+
+void KML_Transformer::KMLNewValue(int waypoint_num, float input[3])
+{
+    // Create <coordinates>.
+    CoordinatesPtr coordinates = factory->CreateCoordinates();
+    // Create <coordinates>-122.0816695,37.42052549<coordinates>
+
+    // Create <Point> and give it <coordinates>.
+    PointPtr point = factory->CreatePoint();
+
+    // Create <Placemark> and give it a <name> and the <Point>.
+    PlacemarkPtr placemark = factory->CreatePlacemark();
+
+    double deg_lat = 111111;
+    double deg_lon = 111111 * cos(home_point[0] * 180 / M_PI);
+
+    coordinates->add_latlngalt(home_point[0] + input[0] / deg_lat, home_point[1] + input[1] / deg_lon, home_point[2] + input[2] * (-1));
+    point->set_coordinates(coordinates);  // point takes ownership
+    placemark->set_name("Waypoint" + std::to_string(waypoint_num));
+    placemark->set_geometry(point);  // placemark takes ownership
+    document->add_feature(placemark);
+
+    xml = kmldom::SerializePretty(kml);
+
+    write.open(filename.c_str(), std::ios::out);
+    write.write(xml.c_str(), xml.size());
+    write.close();
+}
 
 //PPM
 
@@ -219,6 +287,7 @@ SYSTEMTIME st;
 PPM PPMs[3];
 ASP ASPs[3];
 Aircraft Aircrafts;
+//KML_Transformer KML;
 
 float latitude_related = 0;
 float longitude_related = 0;
@@ -1055,7 +1124,7 @@ void ModelAircraft()
     }
     int i = Aircrafts.IdPPM;
 
-    while (i != 2)
+    while (i != 3)
     {
         chrono::steady_clock::time_point tend = chrono::steady_clock::now() + chrono::milliseconds(1);
 
@@ -1064,7 +1133,7 @@ void ModelAircraft()
 
         TimerAircraft TimerAir;
         TimerAir.update(fly, tend);
-
+        i = Aircrafts.IdPPM;
     }
 }
 
@@ -1441,7 +1510,7 @@ void ModelOPS()
     }
     int i = Aircrafts.IdPPM;
 
-    while (i != 2)
+    while (i != 3)
     {
         chrono::steady_clock::time_point tend = chrono::steady_clock::now() + chrono::milliseconds(1);
 
@@ -1450,9 +1519,18 @@ void ModelOPS()
 
         TimerAircraft TimerAir;
         TimerAir.update(ops, tend);
-
+        i = Aircrafts.IdPPM;
     }
 
+}
+
+void KML_t()
+{
+    float p[3];
+    p[0] = Aircrafts.longitude;
+    p[1] = Aircrafts.latitude;
+    p[2] = Aircrafts.height;
+    //KML.KMLNewValue(1, p);
 }
 
 int main()
@@ -1475,6 +1553,11 @@ int main()
     Aircrafts.err_xz = 1000;
     Aircrafts.captured = 0;
     Aircrafts.D = 0;
+
+    double home[3];
+    home[0] = Aircrafts.longitude;
+    home[1] = Aircrafts.latitude;
+    home[2] = Aircrafts.height;
 
     PPM PPM1{};
     PPM1.height = 0;
@@ -1536,6 +1619,17 @@ int main()
 
     CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)ModelAircraft, NULL, NULL, NULL);
     CreateThread(NULL, NULL, (LPTHREAD_START_ROUTINE)ModelOPS, NULL, NULL, NULL);
+
+    while (Aircrafts.IdPPM != 3)
+    {
+        void(*kml)();
+        kml = KML_t;
+
+        TimerAircraft TimerKML;
+        TimerKML.update(kml, chrono::steady_clock::now() + chrono::milliseconds(100));
+    }
+
+    //KML.CreateKML("KML_race", home);
 
     while (true)
     {
